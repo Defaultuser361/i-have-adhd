@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
 """Blind-judge paired evaluation responses and emit scorable rows."""
 
-from __future__ import annotations
-
 import argparse
 import hashlib
 import json
 import subprocess
-import tempfile
 import sys
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -173,7 +170,7 @@ def assign_labels(group_key: tuple, conditions: list[str]) -> dict[str, str]:
 
 def invoke_judge(
     command: list[str], response_format: str, prompt: str, retries: int
-) -> tuple[str, float | None]:
+) -> tuple[str, Optional[float]]:
     """Run the judge runner once, retrying transient failures.
 
     The prompt goes in on stdin rather than as a trailing argument: a runner
@@ -211,14 +208,14 @@ def _judge_group(
     group_key: tuple,
     labels: dict[str, str],
     retries: int,
-) -> tuple[list[dict[str, Any]], float | None]:
+) -> tuple[list[dict[str, Any]], Optional[float]]:
     """Invoke the judge and parse its verdict, retrying a malformed reply.
 
     A grader occasionally drops a field or emits prose around the JSON. That is
     a transient formatting failure rather than a permanent one, so it is worth
     the same retry budget as a failed process before the group is abandoned.
     """
-    last_error: ValueError | None = None
+    last_error: Optional[ValueError] = None
     for attempt in range(retries + 1):
         text, cost = invoke_judge(command, response_format, prompt, retries)
         try:
@@ -245,14 +242,17 @@ def _build_parser() -> argparse.ArgumentParser:
         nargs="+",
         choices=sorted(run_evals.CONDITIONS),
         default=["baseline", "candidate"],
-        help="Conditions that every response group must contain (default: baseline candidate).",
+        help=(
+            "Conditions that every response group must contain "
+            "(default: baseline candidate)."
+        ),
     )
     parser.add_argument("--retries", type=int, default=2)
     parser.add_argument("--output", type=Path, required=True)
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     args = _build_parser().parse_args(argv)
     rubric = grader_rubric(args.rubric.read_text(encoding="utf-8"))
     cases = {case["id"]: case for case in run_evals.load_cases(args.cases)}

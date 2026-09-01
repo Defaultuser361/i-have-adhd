@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Validate, run, and score paired response-quality evaluations."""
 
-from __future__ import annotations
-
 import argparse
 from contextlib import contextmanager
 import json
@@ -14,7 +12,7 @@ import time
 from collections import Counter, defaultdict
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -204,7 +202,7 @@ def _strip_frontmatter(text: str) -> str:
     return text
 
 
-def _condition_prompt(task: str, condition: str, skill_path: Path | None) -> str:
+def _condition_prompt(task: str, condition: str, skill_path: Optional[Path]) -> str:
     if condition == "baseline":
         return task
     if skill_path is None:
@@ -218,7 +216,9 @@ def _condition_prompt(task: str, condition: str, skill_path: Path | None) -> str
     )
 
 
-def _parse_response(output: str, response_format: str) -> tuple[str, dict[str, Any], float | None]:
+def _parse_response(
+    output: str, response_format: str
+) -> tuple[str, dict[str, Any], Optional[float]]:
     if response_format == "text":
         return output.strip(), {}, None
     if response_format == "claude-json":
@@ -371,7 +371,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     if hasattr(args, "handler"):

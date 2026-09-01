@@ -336,7 +336,14 @@ class EndToEndTest(unittest.TestCase):
             output = tmp_path / "scores.jsonl"
             runner_config = tmp_path / "runners.json"
             runner_config.write_text(
-                json.dumps({"stub": {"command": ["sh", "-c", "exit 99"], "response_format": "text"}})
+                json.dumps(
+                    {
+                        "stub": {
+                            "command": ["sh", "-c", "exit 99"],
+                            "response_format": "text",
+                        }
+                    }
+                )
             )
 
             with self.assertRaisesRegex(ValueError, "missing required condition"):
