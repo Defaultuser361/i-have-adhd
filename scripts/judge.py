@@ -171,7 +171,7 @@ def assign_labels(group_key: tuple, conditions: list[str]) -> dict[str, str]:
     return dict(zip(ordered, labels))
 
 
-def _neutral_cwd() -> str:
+def _neutral_cwd():
     """Run the judge in the same neutral context generation uses."""
     return run_evals._neutral_cwd()
 
@@ -188,14 +188,15 @@ def invoke_judge(
     """
     completed = None
     for attempt in range(retries + 1):
-        completed = subprocess.run(
-            list(command),
-            check=False,
-            capture_output=True,
-            text=True,
-            input=prompt,
-            cwd=_neutral_cwd(),
-        )
+        with _neutral_cwd() as cwd:
+            completed = subprocess.run(
+                list(command),
+                check=False,
+                capture_output=True,
+                text=True,
+                input=prompt,
+                cwd=cwd,
+            )
         if completed.returncode == 0:
             break
         if attempt < retries:
@@ -244,6 +245,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--runner-config", type=Path, default=ROOT / "evals" / "runners.example.json"
     )
     parser.add_argument("--runner", required=True)
+    parser.add_argument(
+        "--conditions",
+        nargs="+",
+        choices=sorted(run_evals.CONDITIONS),
+        default=["baseline", "candidate"],
+        help="Conditions that every response group must contain (default: baseline candidate).",
+    )
     parser.add_argument("--retries", type=int, default=2)
     parser.add_argument("--output", type=Path, required=True)
     return parser
@@ -258,7 +266,17 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError(f"{args.responses}: no responses to judge")
 
     groups = group_responses(rows)
-    required = {row["condition"] for row in rows}
+    required = set(args.conditions)
+    observed = {row["condition"] for row in rows}
+    missing = sorted(required - observed)
+    unexpected = sorted(observed - required)
+    if missing or unexpected:
+        details = []
+        if missing:
+            details.append(f"missing required condition(s): {', '.join(missing)}")
+        if unexpected:
+            details.append(f"unexpected condition(s): {', '.join(unexpected)}")
+        raise ValueError("Response conditions do not match --conditions: " + "; ".join(details))
     complete, incomplete = partition_groups(groups, required)
     for case_id, trial in sorted(incomplete):
         print(
@@ -293,7 +311,7 @@ def main(argv: list[str] | None = None) -> int:
                 scored, cost = _judge_group(
                     command, response_format, prompt, key, labels, args.retries
                 )
-            except ValueError as exc:
+            except (ValueError, RuntimeError) as exc:
                 # One unusable verdict must not discard the groups already
                 # written or the ones still queued behind it.
                 print(f"skip {case_id}/trial {trial}: {exc}", file=sys.stderr)

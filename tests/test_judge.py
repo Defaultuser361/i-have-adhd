@@ -159,15 +159,21 @@ class PromptTest(unittest.TestCase):
 
 
 class NeutralWorkingDirectoryTest(unittest.TestCase):
-    def test_runner_cwd_is_an_empty_directory_outside_the_repository(self):
+    def test_runner_cwd_is_fresh_and_outside_the_repository(self):
         # An agent CLI adopts its working directory as project context. Run it
         # in the repo and it starts inspecting the eval harness instead of
         # answering the prompt, which contaminates the responses being graded.
-        cwd = Path(judge._neutral_cwd()).resolve()
+        with judge._neutral_cwd() as first:
+            cwd = Path(first).resolve()
+            self.assertNotEqual(judge.ROOT.resolve(), cwd)
+            self.assertFalse(str(cwd).startswith(str(judge.ROOT.resolve())))
+            self.assertEqual([], list(cwd.iterdir()))
+            (cwd / "state-from-prior-run").write_text("not reusable")
 
-        self.assertNotEqual(judge.ROOT.resolve(), cwd)
-        self.assertFalse(str(cwd).startswith(str(judge.ROOT.resolve())))
-        self.assertEqual([], list(cwd.iterdir()))
+        with judge._neutral_cwd() as second:
+            next_cwd = Path(second).resolve()
+            self.assertNotEqual(cwd, next_cwd)
+            self.assertEqual([], list(next_cwd.iterdir()))
 
 
 class EndToEndTest(unittest.TestCase):
@@ -308,6 +314,93 @@ class EndToEndTest(unittest.TestCase):
 
             rows = run_evals.read_jsonl(output)
             self.assertEqual({"direct-answer"}, {row["case_id"] for row in rows})
+            self.assertEqual(2, len(rows))
+            self.assertNotEqual(0, exit_code, "skipped groups must not report success")
+
+    def test_missing_entire_condition_fails_before_judging(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            responses = tmp_path / "responses.jsonl"
+            responses.write_text(
+                json.dumps(
+                    {
+                        "case_id": "direct-answer",
+                        "trial": 1,
+                        "condition": "baseline",
+                        "runner": "stub",
+                        "response": "102",
+                    }
+                )
+                + "\n"
+            )
+            output = tmp_path / "scores.jsonl"
+            runner_config = tmp_path / "runners.json"
+            runner_config.write_text(
+                json.dumps({"stub": {"command": ["sh", "-c", "exit 99"], "response_format": "text"}})
+            )
+
+            with self.assertRaisesRegex(ValueError, "missing required condition"):
+                judge.main(
+                    [
+                        "--responses", str(responses),
+                        "--runner-config", str(runner_config),
+                        "--runner", "stub",
+                        "--output", str(output),
+                    ]
+                )
+            self.assertFalse(output.exists())
+
+    def test_runner_failure_skips_its_group_and_continues(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            responses = tmp_path / "responses.jsonl"
+            responses.write_text(
+                "".join(
+                    json.dumps(
+                        {
+                            "case_id": case_id,
+                            "trial": 1,
+                            "condition": condition,
+                            "runner": "stub",
+                            "response": f"{case_id} {condition} text",
+                        }
+                    )
+                    + "\n"
+                    for case_id in ("direct-answer", "casual-message")
+                    for condition in ("baseline", "candidate")
+                )
+            )
+            verdict = tmp_path / "verdict.json"
+            verdict.write_text(json.dumps({"A": self.VERDICT, "B": self.VERDICT}))
+            runner_config = tmp_path / "runners.json"
+            runner_config.write_text(
+                json.dumps(
+                    {
+                        "stub": {
+                            "command": [
+                                "sh",
+                                "-c",
+                                f'p=$(cat); case "$p" in *direct-answer*) exit 7;; *) cat {verdict};; esac',
+                            ],
+                            "response_format": "text",
+                        }
+                    }
+                )
+            )
+            output = tmp_path / "scores.jsonl"
+
+            exit_code = judge.main(
+                [
+                    "--responses", str(responses),
+                    "--runner-config", str(runner_config),
+                    "--runner", "stub",
+                    "--retries", "0",
+                    "--output", str(output),
+                ]
+            )
+
+            rows = run_evals.read_jsonl(output)
+            self.assertEqual({"casual-message"}, {row["case_id"] for row in rows})
             self.assertEqual(2, len(rows))
             self.assertNotEqual(0, exit_code, "skipped groups must not report success")
 

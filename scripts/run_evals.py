@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import json
 import shlex
 import subprocess
@@ -11,6 +12,7 @@ import sys
 import tempfile
 import time
 from collections import Counter, defaultdict
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -27,11 +29,9 @@ WEIGHTS = {
 CONDITIONS = {"baseline", "candidate", "comparator"}
 
 
-_NEUTRAL_CWD: str | None = None
-
-
-def _neutral_cwd() -> str:
-    """An empty scratch directory to run a runner in.
+@contextmanager
+def _neutral_cwd() -> Iterator[str]:
+    """Yield an empty scratch directory for one runner invocation.
 
     Agent CLIs adopt their working directory as project context: run one inside
     this checkout and it answers prompts by inspecting the harness instead of
@@ -42,10 +42,8 @@ def _neutral_cwd() -> str:
     working directory is simply another channel the operator's world leaks in
     through.
     """
-    global _NEUTRAL_CWD
-    if _NEUTRAL_CWD is None:
-        _NEUTRAL_CWD = tempfile.mkdtemp(prefix="eval-neutral-cwd-")
-    return _NEUTRAL_CWD
+    with tempfile.TemporaryDirectory(prefix="eval-neutral-cwd-") as cwd:
+        yield cwd
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -294,13 +292,14 @@ def run_evaluations(args: argparse.Namespace) -> int:
                 invocation.append(prompt)
                 completed = None
                 for attempt in range(args.retries + 1):
-                    completed = subprocess.run(
-                        invocation,
-                        check=False,
-                        capture_output=True,
-                        text=True,
-                        cwd=_neutral_cwd(),
-                    )
+                    with _neutral_cwd() as cwd:
+                        completed = subprocess.run(
+                            invocation,
+                            check=False,
+                            capture_output=True,
+                            text=True,
+                            cwd=cwd,
+                        )
                     if completed.returncode == 0:
                         break
                     if attempt < args.retries:
