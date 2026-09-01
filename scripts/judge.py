@@ -171,11 +171,6 @@ def assign_labels(group_key: tuple, conditions: list[str]) -> dict[str, str]:
     return dict(zip(ordered, labels))
 
 
-def _neutral_cwd():
-    """Run the judge in the same neutral context generation uses."""
-    return run_evals._neutral_cwd()
-
-
 def invoke_judge(
     command: list[str], response_format: str, prompt: str, retries: int
 ) -> tuple[str, float | None]:
@@ -188,7 +183,7 @@ def invoke_judge(
     """
     completed = None
     for attempt in range(retries + 1):
-        with _neutral_cwd() as cwd:
+        with run_evals._neutral_cwd() as cwd:
             completed = subprocess.run(
                 list(command),
                 check=False,

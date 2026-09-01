@@ -163,14 +163,14 @@ class NeutralWorkingDirectoryTest(unittest.TestCase):
         # An agent CLI adopts its working directory as project context. Run it
         # in the repo and it starts inspecting the eval harness instead of
         # answering the prompt, which contaminates the responses being graded.
-        with judge._neutral_cwd() as first:
+        with run_evals._neutral_cwd() as first:
             cwd = Path(first).resolve()
             self.assertNotEqual(judge.ROOT.resolve(), cwd)
             self.assertFalse(str(cwd).startswith(str(judge.ROOT.resolve())))
             self.assertEqual([], list(cwd.iterdir()))
             (cwd / "state-from-prior-run").write_text("not reusable")
 
-        with judge._neutral_cwd() as second:
+        with run_evals._neutral_cwd() as second:
             next_cwd = Path(second).resolve()
             self.assertNotEqual(cwd, next_cwd)
             self.assertEqual([], list(next_cwd.iterdir()))
